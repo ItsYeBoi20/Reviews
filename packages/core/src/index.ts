@@ -7,6 +7,7 @@ export { LLMConsensusAnalyzer } from "./analysis/llm-analyzer.ts";
 export { MockConsensusAnalyzer, heuristicLabel } from "./analysis/mock-analyzer.ts";
 export { PROMPT_VERSION } from "./analysis/prompts.ts";
 export type { LLMProvider, JsonRequest } from "./llm/types.ts";
+export { OpenAICompatibleProvider, type JsonMode } from "./llm/openai-compatible.ts";
 export * from "./reddit/types.ts";
 export * from "./reddit/discovery.ts";
 export * from "./reddit/filter.ts";

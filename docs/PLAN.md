@@ -12,7 +12,7 @@ They are never blended. When they disagree, the gap is itself useful (a game Red
 ## Decisions
 
 1. **The model labels, the code scores.** The LLM reads comments and returns a sentiment plus aspect tags for each one. The 0-100 score, confidence and pros/cons shares come from deterministic math over those labels. Scores are reproducible, auditable (every label is stored), and can be recomputed without another LLM call. Prompt injection inside a comment can at worst flip that one comment's label.
-2. **Swappable AI provider.** "mStudio" (mstudio.ai) turned out to be an AI filmmaking platform. Its API creates storyboards, images and video, and has no text-analysis endpoint. The analyzer depends on a one-method interface (`generateJson`) with adapters for **MindStudio** (agent API), **any OpenAI-compatible server** (LM Studio, Ollama, vLLM, Mistral, OpenRouter), **Anthropic** (Claude) and an offline **mock**. Switching providers means changing one env var.
+2. **mittwald AI Hosting is the primary AI provider, behind a swappable interface.** The analyzer depends on a one-method interface (`generateJson`). `LLM_PROVIDER=mittwald` calls mittwald's OpenAI-compatible endpoint, using an API key from mStudio. Other adapters: any OpenAI-compatible server (LM Studio, Ollama, vLLM, Mistral), MindStudio, Anthropic (Claude), and an offline mock. Switching providers means changing one env var.
 3. **Postgres is the only stateful dependency.** App data, search (pg_trgm) and the job queue (pg-boss) all live there. Redis can come later if caching needs it.
 4. **Separate API server.** The REST API (Fastify) is independent of the web app, so a mobile app or third-party clients can use it later. The web app calls it server-side for SSR and through a same-origin `/api` rewrite from the browser, which keeps the session cookie first-party and avoids CORS.
 5. **The database decides what is due.** `titles.consensus_next_at` is the single schedule. The worker's 5-minute tick turns due rows into jobs, and the API's "refresh now" just sets that column. The API never talks to the queue.
@@ -39,7 +39,7 @@ flowchart LR
   end
   PG[(Postgres: data + queue)]
   RD[Reddit Data API]
-  LLM[LLM provider: MindStudio / LM Studio / Claude / mock]
+  LLM[LLM provider: mittwald AI Hosting / other adapters / mock]
   CAT[TMDB + IGDB]
 
   B --> SSR --> R
@@ -93,12 +93,32 @@ Implemented in `packages/core/src/pipeline.ts`. One run per title:
 
 | `LLM_PROVIDER` | Use it for | Setup |
 |---|---|---|
+| `mittwald` | **Production default.** mittwald AI Hosting, managed in mStudio | `MITTWALD_API_KEY` (created in mStudio). Optional: `MITTWALD_MODEL` (default `gpt-oss-120b`), `LLM_REASONING_EFFORT` |
 | `mock` | Local dev, CI, demos | Nothing. Lexicon-based; never use it on real data |
 | `openai-compatible` | LM Studio or any hosted OpenAI-style API | `LLM_BASE_URL` (LM Studio: `http://localhost:1234/v1`), `LLM_MODEL`, optional `LLM_API_KEY` |
 | `mindstudio` | Running the analysis as a MindStudio agent | See below |
 | `anthropic` | Claude via the official SDK, with structured outputs and server-side refusal fallbacks | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-opus-5-5`), `ANTHROPIC_EFFORT` (default `low`) |
 
-**MindStudio setup.** MindStudio runs agents you build in its editor rather than exposing a raw completion endpoint.
+**mittwald AI Hosting setup.**
+
+1. In mStudio, open AI Hosting and create an API key.
+2. Set `LLM_PROVIDER=mittwald` and `MITTWALD_API_KEY`.
+3. Run `pnpm consensus:run <slug>` on one title and read the result before turning the worker loose.
+
+| Setting | What it does |
+|---|---|
+| Endpoint | `https://llm.aihosting.mittwald.de/v1/chat/completions`, Bearer auth |
+| `MITTWALD_MODEL` | Model choice. Models in mittwald's docs (Nov 2026): `gpt-oss-120b` (131k context, the default; strongest reasoning of the three), `Qwen3.6-35B-A3B-FP8` (256k), `Ministral-3-14B-Instruct-2512` (262k, smaller and faster). `GET /v1/models` with your key returns the current list |
+| `LLM_REASONING_EFFORT` | Sent as `reasoning_effort` for gpt-oss. `low` is usually enough for labeling. Leave it unset if the server rejects the field |
+| `LLM_JSON_MODE` | The adapter starts with `response_format: json_schema` (constrained decoding). If the server rejects that with a 400 naming the response format, it steps down to `json_object`, then to prompt-only, and remembers the working mode. Output is validated against the zod schema in every mode, and invalid JSON is retried |
+| `LLM_BATCH_SIZE`, `LLM_CONCURRENCY` | Comments per labeling call (default 40) and parallel calls (default 3). Lower them if you see 429s, or if a smaller model starts mislabeling comment ids in big batches |
+
+**Not verified yet.** This sandbox's network policy blocks both mittwald's API and its developer docs, so the adapter is covered by unit tests against simulated responses only. Unknowns to settle on the first real run:
+- Which JSON mode the endpoint accepts.
+- Rate limits and pricing for your plan.
+- mittwald's data-processing terms for prompts (relevant because Reddit text is sent to the model).
+
+**MindStudio setup** (only if you switch to it). MindStudio runs agents you build in its editor rather than exposing a raw completion endpoint.
 
 1. Create an agent whose Start block declares three launch variables: `system`, `prompt`, `json_schema`.
 2. Add a Generate Text block that uses `{{system}}` as the system message. The user message should be `{{prompt}}`, followed by "Respond with JSON matching: `{{json_schema}}`".
@@ -114,8 +134,9 @@ The adapter posts to `MINDSTUDIO_RUN_URL` (default `https://api.mindstudio.ai/de
 | Claude Opus 5.5 | $4 / $20 | ~$0.21 | ~$1,050 |
 | Claude Haiku 5.5 | $0.10 / $0.50 | ~$0.005 | ~$25 |
 | LM Studio (local) | hardware only | 0 | 0, but throughput-bound |
+| mittwald AI Hosting | per your mStudio plan | not published in the docs I could reach | check mStudio |
 
-5,000 refreshes/month is roughly what 2,000 tracked titles generate on the cadence above. **Recommendation:** before launch, hand-label 300 real comments and measure each candidate model's labeling agreement against that set. Then pick per stage: labeling is high volume and simple, so it is the place to use a cheaper model if it holds up; the single summary call is where a stronger model pays off. Non-urgent back-catalog refreshes can go through Anthropic's Message Batches API at 50% off.
+5,000 refreshes/month is roughly what 2,000 tracked titles generate on the cadence above. **Recommendation:** before launch, hand-label 300 real comments and measure each mittwald model's labeling agreement against that set. Start with `gpt-oss-120b`, and switch labeling to `Ministral-3-14B-Instruct-2512` only if it scores within a few points. Non-urgent back-catalog refreshes can go through Anthropic's Message Batches API at 50% off.
 
 ## Reddit access and compliance (biggest risk)
 
@@ -186,12 +207,12 @@ Base URL `http://localhost:4000` (or `/api` through the web app). JSON in and ou
 **Phase 0, this repo (done):**
 - Working vertical slice: catalog, consensus pipeline, user reviews, auth, web UI.
 - Runs offline on fictional fixture titles with synthetic Reddit threads.
-- 26 tests, covering unit logic and API integration.
+- 32 tests, covering unit logic, provider adapters and API integration.
 
 **Phase 1, launch readiness:**
 - Reddit approval and production credentials.
 - Live TMDB/IGDB sync. The clients are written but untested against live keys.
-- Model selection eval (300 labeled comments).
+- First live mittwald run, then the model selection eval (300 labeled comments).
 - Email verification and password reset.
 - Moderation UI, deletion re-check for quotes, CDN caching.
 - Structured logs to OpenTelemetry; deploy pipeline.
@@ -209,6 +230,6 @@ Base URL `http://localhost:4000` (or `/api` through the web app). JSON in and ou
 
 ## Assumptions to confirm
 
-- **Which "mStudio" did you mean?** The interface supports MindStudio, LM Studio and Claude today. If you meant a different product with a text endpoint, it needs one ~50-line adapter in `packages/core/src/llm/`.
+- **mittwald plan limits.** Rate limits and pricing on your mStudio plan decide `LLM_CONCURRENCY` and how many titles can be tracked per month.
 - **Monetization plans.** They decide which Reddit, TMDB and IGDB commercial terms apply.
 - **The name.** "Verdict" is a placeholder.

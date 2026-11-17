@@ -1,6 +1,7 @@
 import { AnthropicProvider } from "./llm/anthropic.ts";
 import { MindStudioProvider } from "./llm/mindstudio.ts";
-import { OpenAICompatibleProvider } from "./llm/openai-compatible.ts";
+import { OpenAICompatibleProvider, type JsonMode } from "./llm/openai-compatible.ts";
+import type { LLMProvider } from "./llm/types.ts";
 import { LLMConsensusAnalyzer } from "./analysis/llm-analyzer.ts";
 import { MockConsensusAnalyzer } from "./analysis/mock-analyzer.ts";
 import type { ConsensusAnalyzer } from "./analysis/types.ts";
@@ -23,13 +24,38 @@ export function createRedditSource(env: Env = process.env): RedditSource {
   throw new Error(`Unknown REDDIT_SOURCE "${kind}" (expected fixtures | api)`);
 }
 
+export const MITTWALD_BASE_URL = "https://llm.aihosting.mittwald.de/v1";
+export const MITTWALD_DEFAULT_MODEL = "gpt-oss-120b";
+
+function jsonMode(v: string | undefined): JsonMode | undefined {
+  return v === "json_schema" || v === "json_object" || v === "prompt" ? v : undefined;
+}
+
 export function createAnalyzer(env: Env = process.env): ConsensusAnalyzer {
   const provider = env.LLM_PROVIDER ?? "mock";
+  // Comments per labeling call and parallel calls; lower both if the provider rate-limits.
+  const batchSize = Number(env.LLM_BATCH_SIZE ?? 40);
+  const concurrency = Number(env.LLM_CONCURRENCY ?? 3);
+  const analyzer = (llm: LLMProvider) => new LLMConsensusAnalyzer(llm, batchSize, concurrency);
+
   switch (provider) {
     case "mock":
       return new MockConsensusAnalyzer();
+    case "mittwald":
+      // mittwald AI Hosting (key created in mStudio): OpenAI-compatible chat completions.
+      if (!env.MITTWALD_API_KEY) throw new Error("MITTWALD_API_KEY is required for LLM_PROVIDER=mittwald (create one in mStudio under AI Hosting)");
+      return analyzer(
+        new OpenAICompatibleProvider({
+          name: "mittwald",
+          baseUrl: env.MITTWALD_BASE_URL || MITTWALD_BASE_URL,
+          apiKey: env.MITTWALD_API_KEY,
+          model: env.MITTWALD_MODEL || MITTWALD_DEFAULT_MODEL,
+          jsonMode: jsonMode(env.LLM_JSON_MODE),
+          extraBody: env.LLM_REASONING_EFFORT ? { reasoning_effort: env.LLM_REASONING_EFFORT } : undefined,
+        }),
+      );
     case "mindstudio":
-      return new LLMConsensusAnalyzer(
+      return analyzer(
         new MindStudioProvider({
           apiKey: env.MINDSTUDIO_API_KEY ?? "",
           appId: env.MINDSTUDIO_APP_ID ?? "",
@@ -38,11 +64,15 @@ export function createAnalyzer(env: Env = process.env): ConsensusAnalyzer {
         }),
       );
     case "openai-compatible":
-      return new LLMConsensusAnalyzer(
-        new OpenAICompatibleProvider({ baseUrl: env.LLM_BASE_URL ?? "", apiKey: env.LLM_API_KEY, model: env.LLM_MODEL ?? "" }),
+      return analyzer(
+        new OpenAICompatibleProvider({
+          baseUrl: env.LLM_BASE_URL ?? "", apiKey: env.LLM_API_KEY, model: env.LLM_MODEL ?? "",
+          jsonMode: jsonMode(env.LLM_JSON_MODE),
+          extraBody: env.LLM_REASONING_EFFORT ? { reasoning_effort: env.LLM_REASONING_EFFORT } : undefined,
+        }),
       );
     case "anthropic":
-      return new LLMConsensusAnalyzer(
+      return analyzer(
         new AnthropicProvider({
           model: env.ANTHROPIC_MODEL || "claude-opus-5-5",
           apiKey: env.ANTHROPIC_API_KEY || undefined,
@@ -50,6 +80,6 @@ export function createAnalyzer(env: Env = process.env): ConsensusAnalyzer {
         }),
       );
     default:
-      throw new Error(`Unknown LLM_PROVIDER "${provider}" (expected mock | mindstudio | openai-compatible | anthropic)`);
+      throw new Error(`Unknown LLM_PROVIDER "${provider}" (expected mock | mittwald | mindstudio | openai-compatible | anthropic)`);
   }
 }

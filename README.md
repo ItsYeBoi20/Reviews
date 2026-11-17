@@ -38,7 +38,7 @@ Pages built from fixtures are labeled "Sample data".
 | Setting | Values |
 |---|---|
 | `REDDIT_SOURCE` | `api`, with `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` and a real `REDDIT_USER_AGENT` |
-| `LLM_PROVIDER` | `mindstudio`, `openai-compatible` (LM Studio, Ollama, Mistral...), or `anthropic` |
+| `LLM_PROVIDER` | `mittwald` with `MITTWALD_API_KEY` from mStudio (default model `gpt-oss-120b`). Alternatives: `openai-compatible`, `mindstudio`, `anthropic` |
 | Catalog | `TMDB_API_TOKEN` (movies/TV), `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` (IGDB games) |
 
 Read the Reddit compliance section of the plan before using real Reddit data commercially.
