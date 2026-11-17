@@ -1,0 +1,23 @@
+{
+  "name": "verdict",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @verdict/api --filter @verdict/worker --filter @verdict/web dev",
+    "db:generate": "pnpm --filter @verdict/db generate",
+    "db:migrate": "pnpm --filter @verdict/db migrate",
+    "db:seed": "pnpm --filter @verdict/worker seed",
+    "consensus:run": "pnpm --filter @verdict/worker run-once",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "build": "pnpm --filter @verdict/web build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.1.0"
+  }
+}

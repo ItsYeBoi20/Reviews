@@ -1,0 +1,20 @@
+{
+  "name": "@verdict/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "seed": "tsx --env-file-if-exists=../../.env src/seed.ts",
+    "run-once": "tsx --env-file-if-exists=../../.env src/run-once.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@verdict/core": "workspace:*",
+    "@verdict/db": "workspace:*",
+    "@verdict/shared": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "pg-boss": "^12.38.2"
+  }
+}
